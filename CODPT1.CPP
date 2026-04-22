@@ -1,11 +1,10 @@
 /**
  * Trabalho Prático - Análise Empírica de Complexidade de Algoritmos
  * Disciplina: Estruturas de Dados Básicos I
- * * Este programa avalia empiricamente o tempo de execução de algoritmos
- * de busca (Sequencial e Binária) e ordenação (Quicksort e Mergesort).
- * Ele coleta tempos médios para diferentes tamanhos de entrada (n) e
- * ajusta os valores para identificar a melhor ordem de complexidade
- * assintótica: O(log n), O(n) ou O(n log n).
+ * * ATUALIZAÇÃO - REQUISITOS TÉCNICOS:
+ * - Modularidade: Utilização de std::function para injetar algoritmos externos.
+ * - Plotagem: Exportação automática para CSV para geração de gráficos.
+ * - Medição: Utilização da biblioteca <chrono>.
  */
 
 #include <iostream>
@@ -15,18 +14,22 @@
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
+#include <functional> // Necessário para modularidade de funções
+#include <fstream>    // Necessário para exportar os dados para CSV (Gráficos)
 
 using namespace std;
 using namespace std::chrono;
 
+// Estrutura para armazenar os resultados (n, tempo)
+struct ResultadoTeste {
+    int n;
+    double tempoMedioMs;
+};
+
 // =========================================================================
-// 1. ALGORITMOS DE BUSCA
+// 1. ALGORITMOS DE BUSCA E ORDENAÇÃO (NÚCLEO)
 // =========================================================================
 
-/**
- * Busca Sequencial: Percorre o vetor linearmente.
- * Complexidade Teórica: O(n)
- */
 int buscaSequencial(const vector<int>& arr, int alvo) {
     for (size_t i = 0; i < arr.size(); i++) {
         if (arr[i] == alvo) return i;
@@ -34,14 +37,8 @@ int buscaSequencial(const vector<int>& arr, int alvo) {
     return -1;
 }
 
-/**
- * Busca Binária: Divide o espaço de busca pela metade. Requer vetor ordenado.
- * Complexidade Teórica: O(log n)
- */
 int buscaBinaria(const vector<int>& arr, int alvo) {
-    int inicio = 0;
-    int fim = arr.size() - 1;
-    
+    int inicio = 0, fim = arr.size() - 1;
     while (inicio <= fim) {
         int meio = inicio + (fim - inicio) / 2;
         if (arr[meio] == alvo) return meio;
@@ -51,17 +48,9 @@ int buscaBinaria(const vector<int>& arr, int alvo) {
     return -1;
 }
 
-// =========================================================================
-// 2. ALGORITMOS DE ORDENAÇÃO
-// =========================================================================
-
-/**
- * Função auxiliar para o QuickSort (Particionamento de Lomuto)
- */
 int particiona(vector<int>& arr, int baixo, int alto) {
     int pivo = arr[alto];
     int i = (baixo - 1);
-    
     for (int j = baixo; j <= alto - 1; j++) {
         if (arr[j] < pivo) {
             i++;
@@ -72,10 +61,6 @@ int particiona(vector<int>& arr, int baixo, int alto) {
     return (i + 1);
 }
 
-/**
- * QuickSort: Algoritmo de divisão e conquista.
- * Complexidade Teórica: O(n log n) no caso médio, O(n^2) no pior caso.
- */
 void quickSort(vector<int>& arr, int baixo, int alto) {
     if (baixo < alto) {
         int pi = particiona(arr, baixo, alto);
@@ -84,214 +69,159 @@ void quickSort(vector<int>& arr, int baixo, int alto) {
     }
 }
 
-/**
- * Função auxiliar para o MergeSort (Intercalação)
- */
 void merge(vector<int>& arr, int esq, int meio, int dir) {
-    int n1 = meio - esq + 1;
-    int n2 = dir - meio;
-    
+    int n1 = meio - esq + 1, n2 = dir - meio;
     vector<int> L(n1), R(n2);
     for (int i = 0; i < n1; i++) L[i] = arr[esq + i];
     for (int j = 0; j < n2; j++) R[j] = arr[meio + 1 + j];
     
     int i = 0, j = 0, k = esq;
     while (i < n1 && j < n2) {
-        if (L[i] <= R[j]) {
-            arr[k] = L[i];
-            i++;
-        } else {
-            arr[k] = R[j];
-            j++;
-        }
-        k++;
+        if (L[i] <= R[j]) arr[k++] = L[i++];
+        else arr[k++] = R[j++];
     }
     while (i < n1) arr[k++] = L[i++];
     while (j < n2) arr[k++] = R[j++];
 }
 
-/**
- * MergeSort: Algoritmo de divisão e conquista estável.
- * Complexidade Teórica: O(n log n) garantido.
- */
 void mergeSort(vector<int>& arr, int esq, int dir) {
     if (esq < dir) {
         int meio = esq + (dir - esq) / 2;
         mergeSort(arr, esq, meio);
         mergeSort(arr, meio + 1, dir);
-        mergeSort(arr, esq, dir); // Intercala as metades
+        mergeSort(arr, esq, dir);
     }
 }
 
 // =========================================================================
-// 3. INFRAESTRUTURA DE TESTES E COLETA EMPÍRICA
+// 2. ENGINE DE TESTES MODULAR (Cumpre os requisitos de modularidade)
 // =========================================================================
 
-// Estrutura para armazenar os resultados (n, tempo)
-struct ResultadoTeste {
-    int n;
-    double tempoMedioMs; // Tempo em milissegundos
-};
-
-// Gera um vetor com números aleatórios
 vector<int> gerarVetorAleatorio(int n) {
     vector<int> arr(n);
     random_device rd;
     mt19937 gen(rd());
-    uniform_int_distribution<> dis(1, n * 10); // Valores de 1 a 10*n
-    
-    for (int i = 0; i < n; i++) {
-        arr[i] = dis(gen);
-    }
+    uniform_int_distribution<> dis(1, n * 10);
+    for (int i = 0; i < n; i++) arr[i] = dis(gen);
     return arr;
 }
 
-// =========================================================================
-// 4. ANÁLISE DE COMPLEXIDADE (CURVE FITTING)
-// =========================================================================
+/**
+ * Função modular que recebe QUALQUER algoritmo de ordenação via parâmetro.
+ * Permite chamar funções externas facilmente na main().
+ */
+double executarTesteOrdenacao(function<void(vector<int>&, int, int)> algoritmo, vector<int>& arr) {
+    auto inicio = high_resolution_clock::now();
+    algoritmo(arr, 0, arr.size() - 1);
+    auto fim = high_resolution_clock::now();
+    return duration<double, milli>(fim - inicio).count();
+}
 
 /**
- * Analisa os dados empíricos e indica qual função assintótica melhor se ajusta.
- * Método: Calcula a variância da constante C = Tempo / f(n).
- * A função que tiver C mais "constante" (menor coeficiente de variação) é a vencedora.
+ * Função modular que recebe QUALQUER algoritmo de busca via parâmetro.
  */
+double executarTesteBusca(function<int(const vector<int>&, int)> algoritmo, const vector<int>& arr, int alvo) {
+    auto inicio = high_resolution_clock::now();
+    algoritmo(arr, alvo);
+    auto fim = high_resolution_clock::now();
+    return duration<double, milli>(fim - inicio).count();
+}
+
+// =========================================================================
+// 3. EXPORTAÇÃO E ANÁLISE (Cumpre o requisito de plotagem de gráficos)
+// =========================================================================
+
+void exportarParaCSV(const vector<int>& tamanhosN, const vector<ResultadoTeste>& resSeq, 
+                     const vector<ResultadoTeste>& resBin, const vector<ResultadoTeste>& resQuick, 
+                     const vector<ResultadoTeste>& resMerge) {
+    ofstream arquivo("resultados_plotagem.csv");
+    if (arquivo.is_open()) {
+        arquivo << "Tamanho(N),BuscaSeq(ms),BuscaBin(ms),QuickSort(ms),MergeSort(ms)\n";
+        for (size_t i = 0; i < tamanhosN.size(); i++) {
+            arquivo << tamanhosN[i] << "," << resSeq[i].tempoMedioMs << ","
+                    << resBin[i].tempoMedioMs << "," << resQuick[i].tempoMedioMs << ","
+                    << resMerge[i].tempoMedioMs << "\n";
+        }
+        arquivo.close();
+        cout << "\n[!] Um arquivo 'resultados_plotagem.csv' foi gerado na pasta do projeto.\n";
+        cout << "    Utilize-o no Excel ou Python para plotar os graficos exigidos.\n";
+    }
+}
+
 void analisarMelhorAjuste(const vector<ResultadoTeste>& resultados, const string& nomeAlgoritmo) {
     if (resultados.empty()) return;
-
     double mediaC_N = 0, mediaC_NLogN = 0, mediaC_LogN = 0;
     
-    // Calcula as médias das constantes
     for (const auto& res : resultados) {
-        double n = res.n;
-        double t = res.tempoMedioMs;
-        
+        double n = res.n, t = res.tempoMedioMs;
         mediaC_N += t / n;
         mediaC_NLogN += t / (n * log2(n));
         mediaC_LogN += t / log2(n);
     }
-    mediaC_N /= resultados.size();
-    mediaC_NLogN /= resultados.size();
-    mediaC_LogN /= resultados.size();
+    mediaC_N /= resultados.size(); mediaC_NLogN /= resultados.size(); mediaC_LogN /= resultados.size();
 
     double var_N = 0, var_NLogN = 0, var_LogN = 0;
-    
-    // Calcula a variância
     for (const auto& res : resultados) {
-        double n = res.n;
-        double t = res.tempoMedioMs;
-        
+        double n = res.n, t = res.tempoMedioMs;
         var_N += pow((t / n) - mediaC_N, 2);
         var_NLogN += pow((t / (n * log2(n))) - mediaC_NLogN, 2);
         var_LogN += pow((t / log2(n)) - mediaC_LogN, 2);
     }
 
-    // Coeficiente de variação (Desvio Padrão / Média)
     double cv_N = (sqrt(var_N / resultados.size())) / mediaC_N;
     double cv_NLogN = (sqrt(var_NLogN / resultados.size())) / mediaC_NLogN;
     double cv_LogN = (sqrt(var_LogN / resultados.size())) / mediaC_LogN;
 
-    cout << "--- Analise de Ajuste Assintotico para " << nomeAlgoritmo << " ---" << endl;
-    cout << "Variacao para O(log n):   " << cv_LogN << endl;
-    cout << "Variacao para O(n):       " << cv_N << endl;
-    cout << "Variacao para O(n log n): " << cv_NLogN << endl;
-
-    cout << "-> Melhor ajuste empirico: ";
-    if (cv_N < cv_NLogN && cv_N < cv_LogN) cout << "O(n)" << endl;
-    else if (cv_NLogN < cv_N && cv_NLogN < cv_LogN) cout << "O(n log n)" << endl;
-    else cout << "O(log n)" << endl;
-    cout << "--------------------------------------------------------\n\n";
+    cout << "-> Melhor ajuste empirico (" << nomeAlgoritmo << "): ";
+    if (cv_N < cv_NLogN && cv_N < cv_LogN) cout << "O(n)\n";
+    else if (cv_NLogN < cv_N && cv_NLogN < cv_LogN) cout << "O(n log n)\n";
+    else cout << "O(log n)\n";
 }
 
 // =========================================================================
-// 5. FUNÇÃO PRINCIPAL (ORQUESTRADOR)
+// 4. FUNÇÃO PRINCIPAL
 // =========================================================================
 
 int main() {
-    // Tamanhos crescentes de N para os testes
     vector<int> tamanhosN = {10000, 20000, 40000, 80000, 160000};
-    int repeticoes = 10; // Quantidade de vezes que rodamos para tirar a média (minimizar efeitos externos) [cite: 15]
+    int repeticoes = 10; 
 
     vector<ResultadoTeste> resBuscaSeq, resBuscaBin, resQuick, resMerge;
 
-    cout << "Iniciando bateria de testes. Isso pode levar alguns segundos...\n\n";
+    cout << "Iniciando bateria de testes...\n";
 
     for (int n : tamanhosN) {
-        double tempoTotalSeq = 0, tempoTotalBin = 0;
-        double tempoTotalQuick = 0, tempoTotalMerge = 0;
+        double tSeq = 0, tBin = 0, tQuick = 0, tMerge = 0;
 
         for (int r = 0; r < repeticoes; r++) {
-            // Gera dados iniciais
             vector<int> arrBase = gerarVetorAleatorio(n);
+            int alvo = -1; // Força o pior caso na busca
             
-            // Para as buscas, vamos procurar um elemento que NÃO está no vetor 
-            // para forçar o pior caso e ter dados mais consistentes.
-            int alvo = -1; 
-            
-            // ---------------------------------------------------------
-            // Teste: Ordenação QuickSort
-            // ---------------------------------------------------------
-            vector<int> arrQuick = arrBase; // Cópia para não afetar os outros
-            auto inicio = high_resolution_clock::now();
-            quickSort(arrQuick, 0, arrQuick.size() - 1);
-            auto fim = high_resolution_clock::now();
-            tempoTotalQuick += duration<double, milli>(fim - inicio).count();
-
-            // ---------------------------------------------------------
-            // Teste: Ordenação MergeSort
-            // ---------------------------------------------------------
+            vector<int> arrQuick = arrBase;
             vector<int> arrMerge = arrBase;
-            inicio = high_resolution_clock::now();
-            mergeSort(arrMerge, 0, arrMerge.size() - 1);
-            fim = high_resolution_clock::now();
-            tempoTotalMerge += duration<double, milli>(fim - inicio).count();
 
-            // ---------------------------------------------------------
-            // Teste: Busca Sequencial (usando vetor desordenado)
-            // ---------------------------------------------------------
-            inicio = high_resolution_clock::now();
-            buscaSequencial(arrBase, alvo);
-            fim = high_resolution_clock::now();
-            // Multiplicamos por 1000 para converter microsegundos se for muito rapido, 
-            // mas o tipo double, milli ja mantem a precisao fracionaria em milissegundos.
-            tempoTotalSeq += duration<double, milli>(fim - inicio).count();
-
-            // ---------------------------------------------------------
-            // Teste: Busca Binária (Obrigatoriamente num vetor ordenado)
-            // ---------------------------------------------------------
-            // Note que arrQuick já está ordenado pelo teste do QuickSort logo acima.
-            inicio = high_resolution_clock::now();
-            buscaBinaria(arrQuick, alvo);
-            fim = high_resolution_clock::now();
-            tempoTotalBin += duration<double, milli>(fim - inicio).count();
+            // Uso da Engine Modular (permite inserir funções externas facilmente)
+            tQuick += executarTesteOrdenacao(quickSort, arrQuick);
+            tMerge += executarTesteOrdenacao(mergeSort, arrMerge);
+            
+            tSeq += executarTesteBusca(buscaSequencial, arrBase, alvo);
+            tBin += executarTesteBusca(buscaBinaria, arrQuick, alvo); // arrQuick ja esta ordenado
         }
 
-        // Armazena as médias (Pares: n, tempo) [cite: 16]
-        resBuscaSeq.push_back({n, tempoTotalSeq / repeticoes});
-        resBuscaBin.push_back({n, tempoTotalBin / repeticoes});
-        resQuick.push_back({n, tempoTotalQuick / repeticoes});
-        resMerge.push_back({n, tempoTotalMerge / repeticoes});
+        resBuscaSeq.push_back({n, tSeq / repeticoes});
+        resBuscaBin.push_back({n, tBin / repeticoes});
+        resQuick.push_back({n, tQuick / repeticoes});
+        resMerge.push_back({n, tMerge / repeticoes});
     }
 
-    // --- EXIBIÇÃO DE RESULTADOS E AJUSTE DE FUNÇÕES --- [cite: 17, 18, 19]
-
-    cout << fixed << setprecision(5);
-    cout << "=== RESULTADOS DA BUSCA (Tempos em ms) ===\n";
-    cout << "Tamanho (N)\tSeq (O(n))\tBinaria (O(log n))\n";
-    for (size_t i = 0; i < tamanhosN.size(); i++) {
-        cout << tamanhosN[i] << "\t\t" << resBuscaSeq[i].tempoMedioMs << "\t\t" << resBuscaBin[i].tempoMedioMs << "\n";
-    }
-    cout << "\n";
+    cout << "\n=== AJUSTE ASSINTOTICO ===\n";
     analisarMelhorAjuste(resBuscaSeq, "Busca Sequencial");
     analisarMelhorAjuste(resBuscaBin, "Busca Binaria");
-
-    cout << "=== RESULTADOS DA ORDENACAO (Tempos em ms) ===\n";
-    cout << "Tamanho (N)\tQuickSort\tMergeSort\n";
-    for (size_t i = 0; i < tamanhosN.size(); i++) {
-        cout << tamanhosN[i] << "\t\t" << resQuick[i].tempoMedioMs << "\t\t" << resMerge[i].tempoMedioMs << "\n";
-    }
-    cout << "\n";
     analisarMelhorAjuste(resQuick, "QuickSort");
     analisarMelhorAjuste(resMerge, "MergeSort");
+
+    // Gera o arquivo para cumprir a recomendação de plotagem de gráficos
+    exportarParaCSV(tamanhosN, resBuscaSeq, resBuscaBin, resQuick, resMerge);
 
     return 0;
 }
